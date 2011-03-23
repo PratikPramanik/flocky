@@ -51,27 +51,72 @@ module Couch
 end
 # end Couch wrapper
 
+# Notifo wrapper
+module Notifo
+
+  class Service
+    def initialize(name, secret, options = nil)
+      @name = name
+      @secret = secret
+      @options = options
+    end
+
+    def subscribe(user)
+      req = Net::HTTP::Post.new("/subscribe")
+      req.form_data = {:service => @name, :secret => @secret, :user => user}
+      request req
+    end
+    
+    def post(user, message)
+      req = Net::HTTP::Post.new("/post")
+      req.form_data = {:service => @name, :secret => @secret, :user => user, :message => message}
+      request req
+    end
+
+    def request(req)
+      url = URI.parse('http://pushproxy.heroku.com')
+      res = Net::HTTP.start(url.host, url.port) { |http| http.request(req) }
+      unless res.kind_of? Net::HTTPSuccess
+        handle_error req, res
+      end
+      res
+    end
+
+    private
+
+    def handle_error(req, res)
+      e = RuntimeError.new("#{res.code}:#{res.message}\nMETHOD:#{req.method}\nURI:#{req.path}\n#{res.body}")
+      raise e
+    end
+  end
+end
+# end Notifo wrapper
+
 require 'json'
 
-COUCH = "your couch url here"
-DB = "group"
-@server = Couch::Server.new(COUCH, "5984")
+COUCH = "a couchdb"
+DB = "a database on that couchdb"
+NOTIFO_SERVICE = "service name"
+NOTIFO_SECRET = "api secret token"
+
+@couch = Couch::Server.new(COUCH, "5984")
+@notifo = Notifo::Service.new(NOTIFO_SERVICE, NOTIFO_SECRET)
 
 def save(number)
   doc = <<-JSON
   {"type":"contact","number":"#{number}"}
   JSON
-  @server.post("/#{DB}", doc)
+  @couch.post("/#{DB}", doc)
 end
 
-def getView(view)
+def view(view)
   server = Couch::Server.new("localhost", "5984")
-  res = @server.get("/#{DB}/_design/group/_view/#{view}")
+  res = @couch.get("/#{DB}/_design/group/_view/#{view}")
   JSON.parse(res.body)
 end
 
 number = $currentCall.callerID.to_s
-numbers = getView('numbers')['rows'].map{|row| row['value']['number'].to_s}
+numbers = view('numbers')['rows'].map{|row| row['value']['number'].to_s}
 save(number) unless numbers.include? number
 
 def send(message, numbers)
